@@ -143,6 +143,7 @@ async fn check_dexscreen_paid(mut rx: broadcast::Receiver<TokenCheckRequest>) {
                 }
             }
 
+            #[cfg(not(feature = "batch_requests"))]
             if dexscreen::check_if_paid(token, client).await {
                 let now = Local::now();
                 println!(
