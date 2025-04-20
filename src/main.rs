@@ -365,29 +365,27 @@ async fn fetch_tokens_from_dexscreen(tx: broadcast::Sender<CheckToken>) {
         println!("Fetching dexscreener page from 1 to {}", end_page);
 
         for page in 1..=end_page {
-            let req1 = client.get(format!("https://dexscreener.com/solana/pumpfun/page-{page}?rankBy=priceChangeM5&order=desc&maxLaunchpadProgress=99.99"));
-            let req2 = client.get(format!("https://dexscreener.com/solana/pumpfun/page-{page}?rankBy=trendingScoreM5&order=desc&maxLaunchpadProgress=99.99"));
-            fetch_tasks.push(tokio::spawn(async {
-                let Ok(resp) = req1.send().await else {
-                    return None;
-                };
-                let Ok(text) = resp.text().await else {
-                    return None;
-                };
+            let req_urls = [
+                format!(
+                    "https://dexscreener.com/solana/pumpfun/page-{page}?rankBy=priceChangeM5&order=desc&maxLaunchpadProgress=99.99"
+                ),
+                format!(
+                    "https://dexscreener.com/solana/pumpfun/page-{page}?rankBy=trendingScoreM5&order=desc&maxLaunchpadProgress=99.99"
+                ),
+            ];
+            for url in req_urls {
+                let req = client.get(url);
+                fetch_tasks.push(tokio::spawn(async {
+                    let Ok(resp) = req.send().await else {
+                        return None;
+                    };
+                    let Ok(text) = resp.text().await else {
+                        return None;
+                    };
 
-                return Some(text);
-            }));
-
-            fetch_tasks.push(tokio::spawn(async {
-                let Ok(resp) = req2.send().await else {
-                    return None;
-                };
-                let Ok(text) = resp.text().await else {
-                    return None;
-                };
-
-                return Some(text);
-            }));
+                    return Some(text);
+                }));
+            }
         }
 
         for task in fetch_tasks {
