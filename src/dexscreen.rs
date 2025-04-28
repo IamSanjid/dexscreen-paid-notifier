@@ -85,7 +85,7 @@ pub enum DexscreenError {
     TooManyRequests,
     ReqwestError(reqwest::Error),
     SimdJsonError(simd_json::Error),
-    Other,
+    Other(String),
 }
 
 impl std::fmt::Display for DexscreenError {
@@ -94,7 +94,7 @@ impl std::fmt::Display for DexscreenError {
             DexscreenError::TooManyRequests => write!(f, "Too many requests"),
             DexscreenError::ReqwestError(e) => write!(f, "Reqwest error: {e}"),
             DexscreenError::SimdJsonError(e) => write!(f, "SimdJson error: {e}"),
-            DexscreenError::Other => write!(f, "Other error"),
+            DexscreenError::Other(e) => write!(f, "Other error: {e}"),
         }
     }
 }
@@ -185,7 +185,7 @@ pub async fn try_check_if_paid(
         .get(&url)
         .send()
         .await
-        .map_err(|_| DexscreenError::Other)?;
+        .map_err(|e| DexscreenError::ReqwestError(e))?;
 
     #[cfg(debug_assertions)]
     if response.status() != reqwest::StatusCode::OK
@@ -197,12 +197,11 @@ pub async fn try_check_if_paid(
             .send()
             .await
         else {
-            println!("Failed to fetch IP");
-            return Err(DexscreenError::Other);
+            return Err(DexscreenError::Other("Failed to fetch IP".to_owned()));
         };
         let Ok(ip_body) = res.text().await else {
             println!("Failed to fetch IP");
-            return Err(DexscreenError::Other);
+            return Err(DexscreenError::Other("Failed to fetch IP".to_owned()));
         };
 
         let Ok(res) = client
@@ -212,11 +211,11 @@ pub async fn try_check_if_paid(
             .await
         else {
             println!("Failed to fetch HEADERS");
-            return Err(DexscreenError::Other);
+            return Err(DexscreenError::Other("Failed to fetch HEADERS".to_owned()));
         };
         let Ok(body) = res.text().await else {
             println!("Failed to fetch HEADERS");
-            return Err(DexscreenError::Other);
+            return Err(DexscreenError::Other("Failed to fetch HEADERS".to_owned()));
         };
 
         println!("Ip check: {}", ip_body);
@@ -228,7 +227,7 @@ pub async fn try_check_if_paid(
             ""
         );
         println!("Response: {:?}", response.headers());
-        return Err(DexscreenError::Other);
+        return Err(DexscreenError::Other("Failed to fetch orders".to_owned()));
     }
 
     if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
@@ -250,7 +249,7 @@ pub async fn try_check_if_paid(
     let mut bytes = bytes.to_vec();
     let parsed =
         simd_json::to_borrowed_value(&mut bytes).map_err(|e| DexscreenError::SimdJsonError(e))?;
-    let orders_value = parsed.as_array().ok_or(DexscreenError::Other)?;
+    let orders_value = parsed.as_array().ok_or(DexscreenError::Other("Parsed array error".to_owned()))?;
     if orders_value.is_empty() {
         return Ok(false);
     }
