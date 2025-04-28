@@ -7,7 +7,7 @@ edition = "2024"
 chrono = "0.4.40"
 fast_websocket_client = "0.3.0"
 http = "1.3.1"
-reqwest = "0.12.15"
+reqwest = { version = "0.12.15", features = ["socks"] }
 simd-json = "0.15.0"
 simdutf8 = "0.1.5"
 tokio = { version = "1.44.2", features = [ "rt-multi-thread", "fs" ] }

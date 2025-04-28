@@ -34,16 +34,19 @@ impl TokenCheck {
 }
 
 fn create_client(
-    proxy: &str,
+    proxy: Option<&str>,
     origin: Option<&str>,
 ) -> Result<reqwest::Client, Box<dyn std::error::Error>> {
     let mut headers = HeaderMap::new();
     if let Some(origin) = origin {
         headers.append(header::ORIGIN, HeaderValue::from_str(origin)?);
     }
+    let mut client_builder = reqwest::Client::builder();
+    if let Some(proxy) = proxy {
+        client_builder = client_builder.proxy(reqwest::Proxy::all(proxy)?);
+    }
     //headers.append("user-agent", HeaderValue::from_static("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"));
-    return Ok(reqwest::Client::builder()
-        .proxy(reqwest::Proxy::all(proxy)?)
+    return Ok(client_builder
         .default_headers(headers)
         .http1_ignore_invalid_headers_in_responses(true)
         .http1_title_case_headers()
@@ -72,7 +75,7 @@ async fn check_dexscreen_paid(mut rx: broadcast::Receiver<TokenCheckRequest>) {
                         proxies.get_unchecked(*id)
                     })
                 } else {
-                    let client = create_client(tc_req.proxy, None).unwrap();
+                    let client = create_client(Some(tc_req.proxy), None).unwrap();
                     proxies_map.insert(tc_req.proxy, proxies.len());
                     let token_check = TokenCheck::from_request(tc_req, proxies.len());
                     proxies.push(client);

@@ -1,4 +1,5 @@
 use crate::common::{Token, calculate_time_difference};
+use http::header;
 use reqwest;
 use simd_json::{
     self,
@@ -6,9 +7,6 @@ use simd_json::{
 };
 use std::time::Duration;
 use tokio;
-
-#[cfg(debug_assertions)]
-use http::header;
 
 #[allow(dead_code)]
 pub fn get_token_created_timestamp<'a>(json: &'a str) -> Option<u64> {
@@ -102,6 +100,7 @@ impl std::fmt::Display for DexscreenError {
 impl std::error::Error for DexscreenError {}
 
 const CHANNEL_ID: &str = "solana";
+const PAID_TIMEOUT_SECS: u64 = 5 * 60; // 5 minutes
 #[cfg(feature = "batch_requests")]
 pub fn paid_request(token: &Token, client: &reqwest::Client) -> reqwest::RequestBuilder {
     let url = format!(
@@ -163,8 +162,8 @@ pub async fn is_response_paid(response: reqwest::Response) -> Result<bool, Dexsc
         let Some(diff) = calculate_time_difference(payment_timestamp) else {
             continue;
         };
-        // 5 minutes
-        if diff.as_secs() < 5 * 60 {
+
+        if diff.as_secs() < PAID_TIMEOUT_SECS {
             return Ok(true);
         }
     }
@@ -249,7 +248,9 @@ pub async fn try_check_if_paid(
     let mut bytes = bytes.to_vec();
     let parsed =
         simd_json::to_borrowed_value(&mut bytes).map_err(|e| DexscreenError::SimdJsonError(e))?;
-    let orders_value = parsed.as_array().ok_or(DexscreenError::Other("Parsed array error".to_owned()))?;
+    let orders_value = parsed
+        .as_array()
+        .ok_or(DexscreenError::Other("Parsed array error".to_owned()))?;
     if orders_value.is_empty() {
         return Ok(false);
     }
@@ -279,8 +280,8 @@ pub async fn try_check_if_paid(
         let Some(diff) = calculate_time_difference(payment_timestamp) else {
             continue;
         };
-        // 5 minutes
-        if diff.as_secs() < 5 * 60 {
+
+        if diff.as_secs() < PAID_TIMEOUT_SECS {
             return Ok(true);
         }
     }
@@ -293,6 +294,19 @@ pub async fn check_if_paid(token: &Token, client: &reqwest::Client) -> bool {
     match result {
         Ok(paid) => paid,
         Err(DexscreenError::TooManyRequests) => {
+            let Ok(res) = client
+                .get("http://httpbin.org/ip")
+                .header(header::USER_AGENT, "")
+                .send()
+                .await
+            else {
+                return false;
+            };
+            let Ok(ip_body) = res.text().await else {
+                println!("Failed to fetch IP");
+                return false;
+            };
+            println!("Ip check: {}", ip_body);
             println!("Too many requests, sleeping for 5 seconds");
             tokio::time::sleep(Duration::from_secs(5)).await;
             return false;

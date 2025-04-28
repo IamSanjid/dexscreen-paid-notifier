@@ -1,5 +1,5 @@
 use simd_json;
-use simd_json::base::{ValueAsArray, ValueAsObject, ValueAsScalar};
+use simd_json::base::{ValueAsScalar, ValueIntoArray, ValueIntoObject, ValueIntoString};
 use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{env, fs};
@@ -45,35 +45,38 @@ pub fn get_config() -> &'static Config {
             panic!("Failed to read config file");
         };
         let config = simd_json::to_owned_value(&mut bytes).expect("Failed to parse config");
-        let config = config.as_object().expect("Config should be an object");
-        let pumpfun_cookie = config
-            .get("pumpfun_cookie")
-            .expect("Missing pumpfun_cookie")
-            .as_str()
-            .expect("pumpfun_cookie should be a string")
-            .to_string();
-        let pumpfun_cookie = Box::leak(pumpfun_cookie.into_boxed_str());
+        let mut config = config.into_object().expect("Config should be an object");
 
-        let dexscreen_cookie = config
-            .get("dexscreen_cookie")
-            .expect("Missing dexscreen_cookie")
-            .as_str()
-            .expect("dexscreen_cookie should be a string")
-            .to_string();
-        let dexscreen_cookie = Box::leak(dexscreen_cookie.into_boxed_str());
+        let pumpfun_cookie = Box::leak(
+            config
+                .remove("pumpfun_cookie")
+                .expect("Missing pumpfun_cookie")
+                .into_string()
+                .expect("pumpfun_cookie should be a string")
+                .into_boxed_str(),
+        );
+
+        let dexscreen_cookie = Box::leak(
+            config
+                .remove("dexscreen_cookie")
+                .expect("Missing dexscreen_cookie")
+                .into_string()
+                .expect("dexscreen_cookie should be a string")
+                .into_boxed_str(),
+        );
 
         let proxies = config
-            .get("proxies")
+            .remove("proxies")
             .expect("Missing proxies")
-            .as_array()
+            .into_array()
             .expect("proxies should be an array")
-            .iter()
-            .filter_map(|v| v.as_str())
-            .map(|s| Box::leak(s.to_string().into_boxed_str()) as &'static str)
+            .into_iter()
+            .filter_map(|v| v.into_string())
+            .map(|s| Box::leak(s.into_boxed_str()) as &'static str)
             .collect::<Vec<&'static str>>();
 
         let checkers_count = config
-            .get("checkers_count")
+            .remove("checkers_count")
             .expect("Missing checkers_count")
             .as_u64()
             .expect("checkers_count should be a positive number")
