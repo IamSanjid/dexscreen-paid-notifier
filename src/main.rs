@@ -3,9 +3,11 @@ use std::{
     time::Duration,
 };
 
-use chrono::Local;
+use chrono::{DateTime, Local};
 use fast_websocket_client::{OpCode, WebSocketClientError, base_client};
 use http::{HeaderMap, HeaderValue, header};
+#[cfg(feature = "notify")]
+use notify_rust::Notification;
 use reqwest;
 use tokio::{self, sync::broadcast, task::JoinHandle};
 
@@ -54,7 +56,30 @@ fn create_client(
         .build()?);
 }
 
-async fn check_dexscreen_paid(mut rx: broadcast::Receiver<TokenCheckRequest>) {
+type PaidNotification = (DateTime<Local>, Token);
+async fn paid_notifications(mut rx: broadcast::Receiver<PaidNotification>) {
+    while let Ok((now, token)) = rx.recv().await {
+        let now = now.format("%H:%M:%S");
+        println!(
+            "[{}]PAID: {} - {} is paid!",
+            now,
+            token.name,
+            token.mint
+        );
+
+        #[cfg(feature = "notify")]
+        {
+            _ = Notification::new()
+                .summary("Token is paid!")
+                .body(format!("[{}] {} - {} is paid!", now, token.name, token.mint).as_str())
+                .appname("Dexscreen Paid Notifier")
+                .timeout(5000)
+                .show();
+        }
+    }
+}
+
+async fn check_dexscreen_paid(mut rx: broadcast::Receiver<TokenCheckRequest>, tx: broadcast::Sender<PaidNotification>) {
     let mut check_tokens = Vec::new();
 
     let mut proxies_map = HashMap::new();
@@ -87,12 +112,7 @@ async fn check_dexscreen_paid(mut rx: broadcast::Receiver<TokenCheckRequest>) {
                 let token = &token_check.token;
                 if dexscreen::check_if_paid(token, client).await {
                     let now = Local::now();
-                    println!(
-                        "[{}]PAID: {} - {} is paid!",
-                        now.format("%H:%M:%S"),
-                        token.name,
-                        token.mint
-                    );
+                    _ = tx.send((now, token.clone()));
 
                     recent_paid.insert(token.mint.clone());
                 }
@@ -128,12 +148,7 @@ async fn check_dexscreen_paid(mut rx: broadcast::Receiver<TokenCheckRequest>) {
                                     if paid {
                                         let token = unsafe { &check_tokens.get_unchecked(i).token };
                                         let now = Local::now();
-                                        println!(
-                                            "[{}]PAID: {} - {} is paid!",
-                                            now.format("%H:%M:%S"),
-                                            token.name,
-                                            token.mint
-                                        );
+                                        _ = tx.send((now, token.clone()));
 
                                         recent_paid.insert(token.mint.clone());
                                     }
@@ -149,12 +164,7 @@ async fn check_dexscreen_paid(mut rx: broadcast::Receiver<TokenCheckRequest>) {
             #[cfg(not(feature = "batch_requests"))]
             if dexscreen::check_if_paid(token, client).await {
                 let now = Local::now();
-                println!(
-                    "[{}]PAID: {} - {} is paid!",
-                    now.format("%H:%M:%S"),
-                    token.name,
-                    token.mint
-                );
+                _ = tx.send((now, token.clone()));
 
                 recent_paid.insert(token.mint.clone());
             }
@@ -170,12 +180,7 @@ async fn check_dexscreen_paid(mut rx: broadcast::Receiver<TokenCheckRequest>) {
                             if paid {
                                 let token = unsafe { &check_tokens.get_unchecked(i).token };
                                 let now = Local::now();
-                                println!(
-                                    "[{}]PAID: {} - {} is paid!",
-                                    now.format("%H:%M:%S"),
-                                    token.name,
-                                    token.mint
-                                );
+                                _ = tx.send((now, token.clone()));
 
                                 recent_paid.insert(token.mint.clone());
                             }
@@ -216,11 +221,13 @@ async fn handle_token_checkers(mut rx: broadcast::Receiver<CheckToken>) {
 
     let mut seen_mints = HashSet::new();
 
+    let (n_tx, n_rx) = broadcast::channel::<PaidNotification>(32);
+    tokio::spawn(paid_notifications(n_rx));
+
     let mut checkers = Vec::new();
     for _ in 0..get_config().checkers_count() {
         let (tx, rx) = broadcast::channel::<TokenCheckRequest>(256);
-
-        tokio::spawn(check_dexscreen_paid(rx));
+        tokio::spawn(check_dexscreen_paid(rx, n_tx.clone()));
         checkers.push(tx);
     }
 

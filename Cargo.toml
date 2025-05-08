@@ -11,6 +11,9 @@ reqwest = { version = "0.12.15", features = ["socks"] }
 simd-json = "0.15.0"
 simdutf8 = "0.1.5"
 tokio = { version = "1.44.2", features = [ "rt-multi-thread", "fs" ] }
+notify-rust = { version = "4", optional = true }
 
 [features]
+default = [ "notify" ]
 batch_requests = []
+notify = ["notify-rust"]
