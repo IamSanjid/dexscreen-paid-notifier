@@ -14,6 +14,6 @@ tokio = { version = "1.44.2", features = [ "rt-multi-thread", "fs" ] }
 notify-rust = { version = "4", optional = true }
 
 [features]
-default = [ "notify" ]
+default = ["notify"]
 batch_requests = []
 notify = ["notify-rust"]

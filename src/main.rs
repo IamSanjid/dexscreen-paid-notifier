@@ -60,12 +60,7 @@ type PaidNotification = (DateTime<Local>, Token);
 async fn paid_notifications(mut rx: broadcast::Receiver<PaidNotification>) {
     while let Ok((now, token)) = rx.recv().await {
         let now = now.format("%H:%M:%S");
-        println!(
-            "[{}]PAID: {} - {} is paid!",
-            now,
-            token.name,
-            token.mint
-        );
+        println!("[{}]PAID: {} - {} is paid!", now, token.name, token.mint);
 
         #[cfg(feature = "notify")]
         {
@@ -79,7 +74,10 @@ async fn paid_notifications(mut rx: broadcast::Receiver<PaidNotification>) {
     }
 }
 
-async fn check_dexscreen_paid(mut rx: broadcast::Receiver<TokenCheckRequest>, tx: broadcast::Sender<PaidNotification>) {
+async fn check_dexscreen_paid(
+    mut rx: broadcast::Receiver<TokenCheckRequest>,
+    tx: broadcast::Sender<PaidNotification>,
+) {
     let mut check_tokens = Vec::new();
 
     let mut proxies_map = HashMap::new();
