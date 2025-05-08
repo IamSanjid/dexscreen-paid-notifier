@@ -60,13 +60,26 @@ type PaidNotification = (DateTime<Local>, Token);
 async fn paid_notifications(mut rx: broadcast::Receiver<PaidNotification>) {
     while let Ok((now, token)) = rx.recv().await {
         let now = now.format("%H:%M:%S");
-        println!("[{}]PAID: {} - {} is paid!", now, token.name, token.mint);
+        let pumpfun_url = format!(
+            "https://pump.fun/board?include-nsfw=true&q={}&coins_sort=market_cap",
+            token.mint
+        );
+        println!(
+            "[{}]PAID: {} - {} is paid! ({})",
+            now, token.name, token.mint, pumpfun_url
+        );
 
         #[cfg(feature = "notify")]
         {
             _ = Notification::new()
                 .summary("Token is paid!")
-                .body(format!("[{}] {} - {} is paid!", now, token.name, token.mint).as_str())
+                .body(
+                    format!(
+                        "[{}] {} - {} is paid! ({})",
+                        now, token.name, token.mint, pumpfun_url
+                    )
+                    .as_str(),
+                )
                 .appname("Dexscreen Paid Notifier")
                 .timeout(5000)
                 .show();
