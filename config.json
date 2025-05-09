@@ -8,5 +8,11 @@
         "http://zocvitfq:r9rbtv3ak721@138.128.153.21:5055",
         "http://zocvitfq:r9rbtv3ak721@82.25.215.208:5559"
     ],
-    "checkers_count": 10
+    "checkers_count": 10,
+    "dexscreen_fetch_filters": [
+        "rankBy=priceChangeM5&order=desc&maxLaunchpadProgress=99.99",
+        "rankBy=trendingScoreM5&order=desc&maxLaunchpadProgress=99.99"
+    ],
+    "dexscreen_fetch_max_pages": 10,
+    "dexscreen_fetch_timeout": 10
 }

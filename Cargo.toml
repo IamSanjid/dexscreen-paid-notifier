@@ -17,3 +17,4 @@ notify-rust = { version = "4", optional = true }
 default = ["notify"]
 batch_requests = []
 notify = ["notify-rust"]
+print_only_paid = []

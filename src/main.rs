@@ -11,7 +11,8 @@ use notify_rust::Notification;
 use reqwest;
 use tokio::{self, sync::broadcast, task::JoinHandle};
 
-use dexscreen_paid_notifier::common::{Token, get_config};
+use dexscreen_paid_notifier::common::Token;
+use dexscreen_paid_notifier::config::get_config;
 use dexscreen_paid_notifier::dexscreen;
 use dexscreen_paid_notifier::pumpfun;
 
@@ -267,10 +268,13 @@ async fn handle_token_checkers(mut rx: broadcast::Receiver<CheckToken>) {
                         }
                         let name = pumpfun::get_token_name(json)
                             .expect(format!("Failed to parse name: {message}").as_str());
+
+                        #[cfg(not(feature = "print_only_paid"))]
                         println!(
                             "Pumpfun - Checking: '{}'(${}) - {}",
                             name, usd_market_cap, mint
                         );
+
                         seen_mints.insert(mint.to_string());
 
                         let checker = unsafe { checkers.get_unchecked(checkers_index) };
@@ -294,10 +298,13 @@ async fn handle_token_checkers(mut rx: broadcast::Receiver<CheckToken>) {
                 if seen_mints.contains(&token.mint) {
                     continue;
                 }
+
+                #[cfg(not(feature = "print_only_paid"))]
                 println!(
                     "Dexscreen - Checking: '{}'(${}) - {}",
                     token.name, token.usd_market_cap, token.mint
                 );
+
                 seen_mints.insert(token.mint.clone());
 
                 let checker = unsafe { checkers.get_unchecked(checkers_index) };
@@ -373,12 +380,13 @@ async fn fetch_tokens_from_dexscreen(tx: broadcast::Sender<CheckToken>) {
         HeaderValue::from_static(get_config().dexscreen_cookie()),
     );
 
+    let config = get_config();
+
     let client = reqwest::ClientBuilder::new()
         .default_headers(headers)
         .build()
         .expect("Failed to create client");
 
-    const PAGE_LIMIT: usize = 10;
     let mut end_page = 1;
     loop {
         let mut fetch_tasks = Vec::new();
@@ -386,27 +394,27 @@ async fn fetch_tokens_from_dexscreen(tx: broadcast::Sender<CheckToken>) {
         println!("Fetching dexscreener page from 1 to {}", end_page);
 
         for page in 1..=end_page {
-            let req_urls = [
-                format!(
-                    "https://dexscreener.com/solana/pumpfun/page-{page}?rankBy=priceChangeM5&order=desc&maxLaunchpadProgress=99.99"
-                ),
-                format!(
-                    "https://dexscreener.com/solana/pumpfun/page-{page}?rankBy=trendingScoreM5&order=desc&maxLaunchpadProgress=99.99"
-                ),
-            ];
-            for url in req_urls {
-                let req = client.get(url);
-                fetch_tasks.push(tokio::spawn(async {
-                    let Ok(resp) = req.send().await else {
-                        return None;
-                    };
-                    let Ok(text) = resp.text().await else {
-                        return None;
-                    };
+            fetch_tasks.extend(
+                config
+                    .dexscreen_fetch_filters()
+                    .iter()
+                    .map(|filter| {
+                        format!("https://dexscreener.com/solana/pumpfun/page-{page}?{filter}")
+                    })
+                    .map(|url| {
+                        let req = client.get(url);
+                        tokio::spawn(async {
+                            let Ok(resp) = req.send().await else {
+                                return None;
+                            };
+                            let Ok(text) = resp.text().await else {
+                                return None;
+                            };
 
-                    return Some(text);
-                }));
-            }
+                            return Some(text);
+                        })
+                    }),
+            );
         }
 
         for task in fetch_tasks {
@@ -415,9 +423,9 @@ async fn fetch_tokens_from_dexscreen(tx: broadcast::Sender<CheckToken>) {
             };
             send_dexscreen_tokens_to_checker(text, &tx);
         }
-        end_page = end_page % PAGE_LIMIT;
+        end_page = end_page % config.dexscreen_fetch_max_pages();
         end_page += 1;
-        tokio::time::sleep(Duration::from_secs(20)).await;
+        tokio::time::sleep(Duration::from_secs(config.dexscreen_fetch_timeout())).await;
     }
 }
 
