@@ -5,6 +5,7 @@ use std::{env, fs};
 
 #[derive(Debug)]
 pub struct Config {
+    user_agent: &'static str,
     pumpfun_cookie: &'static str,
     dexscreen_cookie: &'static str,
     proxies: Vec<&'static str>,
@@ -15,6 +16,10 @@ pub struct Config {
 }
 
 impl Config {
+    pub fn user_agent(&'static self) -> &'static str {
+        self.user_agent
+    }
+
     pub fn pumpfun_cookie(&'static self) -> &'static str {
         self.pumpfun_cookie
     }
@@ -53,6 +58,15 @@ pub fn get_config() -> &'static Config {
         };
         let config = simd_json::to_owned_value(&mut bytes).expect("Failed to parse config");
         let mut config = config.into_object().expect("Config should be an object");
+
+        let user_agent = Box::leak(
+            config
+                .remove("user_agent")
+                .expect("Missing user_agent")
+                .into_string()
+                .expect("user_agent should be a string")
+                .into_boxed_str(),
+        );
 
         let pumpfun_cookie = Box::leak(
             config
@@ -113,6 +127,7 @@ pub fn get_config() -> &'static Config {
             .expect("dexscreen_fetch_timeout should be a positive number");
 
         let config = Config {
+            user_agent,
             pumpfun_cookie,
             dexscreen_cookie,
             proxies,

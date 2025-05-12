@@ -19,3 +19,13 @@ pub fn calculate_time_difference(timestamp_ms: u64) -> Option<Duration> {
         Some(Duration::from_millis(now - timestamp_ms))
     }
 }
+
+#[macro_export]
+macro_rules! debug_println {
+    ($($arg:tt)*) => (#[cfg(debug_assertions)] println!($($arg)*));
+}
+
+#[macro_export]
+macro_rules! debug_eprintln {
+    ($($arg:tt)*) => (#[cfg(debug_assertions)] eprintln!($($arg)*));
+}

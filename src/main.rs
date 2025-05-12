@@ -3,6 +3,8 @@ use std::{
     time::Duration,
 };
 
+#[cfg(feature = "notify")]
+use actually_beep::beep_with_hz_and_millis;
 use chrono::{DateTime, Local};
 use fast_websocket_client::{OpCode, WebSocketClientError, base_client};
 use http::{HeaderMap, HeaderValue, header};
@@ -15,6 +17,7 @@ use dexscreen_paid_notifier::common::Token;
 use dexscreen_paid_notifier::config::get_config;
 use dexscreen_paid_notifier::dexscreen;
 use dexscreen_paid_notifier::pumpfun;
+use dexscreen_paid_notifier::{debug_eprintln, debug_println};
 
 #[derive(Clone, Debug)]
 struct TokenCheckRequest {
@@ -72,6 +75,7 @@ async fn paid_notifications(mut rx: broadcast::Receiver<PaidNotification>) {
 
         #[cfg(feature = "notify")]
         {
+            _ = beep_with_hz_and_millis(329, 1600);
             _ = Notification::new()
                 .summary("Token is paid!")
                 .body(
@@ -255,7 +259,7 @@ async fn handle_token_checkers(mut rx: broadcast::Receiver<CheckToken>) {
                         let json = &message[..pos];
                         //println!("Parsed JSON: {}", json);
                         let Some(usd_market_cap) = pumpfun::get_token_usd_market_cap(json) else {
-                            println!("Failed to parse market cap: {message}");
+                            debug_eprintln!("Failed to parse market cap: {message}");
                             continue;
                         };
                         if usd_market_cap < 10000.0 {
@@ -269,10 +273,11 @@ async fn handle_token_checkers(mut rx: broadcast::Receiver<CheckToken>) {
                         let name = pumpfun::get_token_name(json)
                             .expect(format!("Failed to parse name: {message}").as_str());
 
-                        #[cfg(not(feature = "print_only_paid"))]
-                        println!(
+                        debug_println!(
                             "Pumpfun - Checking: '{}'(${}) - {}",
-                            name, usd_market_cap, mint
+                            name,
+                            usd_market_cap,
+                            mint
                         );
 
                         seen_mints.insert(mint.to_string());
@@ -299,10 +304,11 @@ async fn handle_token_checkers(mut rx: broadcast::Receiver<CheckToken>) {
                     continue;
                 }
 
-                #[cfg(not(feature = "print_only_paid"))]
-                println!(
+                debug_println!(
                     "Dexscreen - Checking: '{}'(${}) - {}",
-                    token.name, token.usd_market_cap, token.mint
+                    token.name,
+                    token.usd_market_cap,
+                    token.mint
                 );
 
                 seen_mints.insert(token.mint.clone());
@@ -343,18 +349,29 @@ async fn handle_pumpfun_ws(
     Ok(())
 }
 
-fn send_dexscreen_tokens_to_checker(text: String, tx: &broadcast::Sender<CheckToken>) {
+fn send_dexscreen_tokens_to_checker(
+    text: String,
+    tx: &broadcast::Sender<CheckToken>,
+) -> Result<(), ()> {
     const START_MARKER: &str = "\"pairs\":[{";
     const END_MARKER: &str = "],\"pairsCount\":";
 
     let Some(pos) = text.find(START_MARKER) else {
-        println!("Failed to find start marker: {}", text);
-        return;
+        #[cfg(debug_assertions)]
+        {
+            eprintln!("Failed to find start marker!");
+            _ = std::fs::write("dexscreen_debug.html", text);
+        }
+        return Err(());
     };
     let (_, next_half) = text.split_at(pos + START_MARKER.len() - 2); // include the `[{`
     let Some(pos) = next_half.find(END_MARKER) else {
-        println!("Failed to find end marker: {}", text);
-        return;
+        #[cfg(debug_assertions)]
+        {
+            eprintln!("Failed to find end marker!");
+            _ = std::fs::write("dexscreen_debug.html", text);
+        }
+        return Err(());
     };
     let pairs_json = &next_half[..pos + 1]; // include the `]`
     for pair in pairs_json.split("},{") {
@@ -366,11 +383,16 @@ fn send_dexscreen_tokens_to_checker(text: String, tx: &broadcast::Sender<CheckTo
         }
         _ = tx.send(CheckToken::Dexscreen(token));
     }
+
+    Ok(())
 }
 
 async fn fetch_tokens_from_dexscreen(tx: broadcast::Sender<CheckToken>) {
     let mut headers = HeaderMap::new();
-    headers.append(header::USER_AGENT, HeaderValue::from_static("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"));
+    headers.append(
+        header::USER_AGENT,
+        HeaderValue::from_static(get_config().user_agent()),
+    );
     headers.append(
         header::ORIGIN,
         HeaderValue::from_static("https://dexscreener.com"),
@@ -391,7 +413,7 @@ async fn fetch_tokens_from_dexscreen(tx: broadcast::Sender<CheckToken>) {
     loop {
         let mut fetch_tasks = Vec::new();
 
-        println!("Fetching dexscreener page from 1 to {}", end_page);
+        debug_println!("Fetching dexscreener page from 1 to {}", end_page);
 
         for page in 1..=end_page {
             fetch_tasks.extend(
@@ -421,7 +443,13 @@ async fn fetch_tokens_from_dexscreen(tx: broadcast::Sender<CheckToken>) {
             let Ok(Some(text)) = task.await else {
                 continue;
             };
-            send_dexscreen_tokens_to_checker(text, &tx);
+            // since all the pages checking tasks are spawned sequentially(1, 2, 3, ...),
+            // we can just break the loop if we get an error, since we won't gonna get any
+            // more valid tokens from the later pages.
+            if send_dexscreen_tokens_to_checker(text, &tx).is_err() {
+                debug_eprintln!("There's nothing in the later pages!");
+                break;
+            }
         }
         end_page = end_page % config.dexscreen_fetch_max_pages();
         end_page += 1;
@@ -431,7 +459,60 @@ async fn fetch_tokens_from_dexscreen(tx: broadcast::Sender<CheckToken>) {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    debug_println!("Debug mode!");
     println!("Starting Dexscreen paid notifier...\n{:#?}", get_config());
+
+    #[cfg(debug_assertions)]
+    {
+        println!("Check proxies in config.json? y/N(default: N)");
+        let mut text = String::new();
+        if std::io::stdin().read_line(&mut text).is_err() {
+            text = "N".to_string();
+        }
+        let ans = text.trim().to_lowercase();
+        match ans.as_str() {
+            "y" | "yes" => {
+                println!("Checking proxies...");
+                let proxies = get_config().proxies();
+                let mut checks = vec![];
+                for (i, proxy) in proxies.iter().enumerate() {
+                    let client = create_client(Some(proxy), None).unwrap();
+                    checks.push((
+                        i,
+                        tokio::spawn(
+                            client
+                                .get("http://httpbin.org/ip")
+                                .header(header::USER_AGENT, "")
+                                .send(),
+                        ),
+                    ));
+                }
+                for (i, task) in checks {
+                    let proxy = unsafe { proxies.get_unchecked(i) };
+                    let Ok(Ok(resp)) = task.await else {
+                        println!("Failed to check proxy {}!", proxy);
+                        continue;
+                    };
+
+                    let Ok(text) = resp.text().await else {
+                        println!("Failed to read response from proxy {}!", proxy);
+                        continue;
+                    };
+
+                    if text.find("\"origin\":").is_none() {
+                        println!("Proxy {} is not working!\n{}", proxy, text);
+                    }
+                }
+
+                println!("Proxy check finished! Press any key to continue...");
+                _ = std::io::stdin().read_line(&mut text);
+            }
+            _ => {
+                println!("Skipping proxy check...");
+            }
+        }
+    }
+
     let mut offline = base_client::Offline::new();
     offline.add_header(
         header::COOKIE,
@@ -444,7 +525,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     offline.add_header(header::ORIGIN, HeaderValue::from_static("https://pump.fun"));
     offline.add_header(
         header::USER_AGENT,
-        HeaderValue::from_static("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36"),
+        HeaderValue::from_static(get_config().user_agent()),
     );
     offline.set_auto_pong(true);
     offline.set_auto_close(false);

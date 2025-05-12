@@ -1,5 +1,4 @@
 use crate::common::{Token, calculate_time_difference};
-use http::header;
 use reqwest;
 use simd_json::{
     self,
@@ -7,6 +6,11 @@ use simd_json::{
 };
 use std::time::Duration;
 use tokio;
+
+#[allow(unused_imports)]
+use crate::{debug_eprintln, debug_println};
+#[allow(unused_imports)]
+use http::header;
 
 #[allow(dead_code)]
 pub fn get_token_created_timestamp<'a>(json: &'a str) -> Option<u64> {
@@ -67,7 +71,7 @@ pub fn get_token<'a>(json: &'a str) -> Option<Token> {
 
     // market cap
     let Some(usd_market_cap) = get_token_market_cap(json) else {
-        println!("Failed to parse market cap: {}", json);
+        debug_eprintln!("Failed to parse market cap: {}", json);
         return None;
     };
 
@@ -199,7 +203,7 @@ pub async fn try_check_if_paid(
             return Err(DexscreenError::Other("Failed to fetch IP".to_owned()));
         };
         let Ok(ip_body) = res.text().await else {
-            println!("Failed to fetch IP");
+            debug_eprintln!("Failed to fetch IP");
             return Err(DexscreenError::Other("Failed to fetch IP".to_owned()));
         };
 
@@ -209,23 +213,23 @@ pub async fn try_check_if_paid(
             .send()
             .await
         else {
-            println!("Failed to fetch HEADERS");
+            debug_eprintln!("Failed to fetch HEADERS");
             return Err(DexscreenError::Other("Failed to fetch HEADERS".to_owned()));
         };
         let Ok(body) = res.text().await else {
-            println!("Failed to fetch HEADERS");
+            debug_eprintln!("Failed to fetch HEADERS");
             return Err(DexscreenError::Other("Failed to fetch HEADERS".to_owned()));
         };
 
-        println!("Ip check: {}", ip_body);
-        println!("Headers check: {}", body);
+        debug_println!("Ip check: {}", ip_body);
+        debug_println!("Headers check: {}", body);
 
-        println!(
+        debug_eprintln!(
             "Failed to fetch orders: {} - user-agent: {}",
             response.status(),
             ""
         );
-        println!("Response: {:?}", response.headers());
+        debug_println!("Response: {:?}", response.headers());
         return Err(DexscreenError::Other("Failed to fetch orders".to_owned()));
     }
 
@@ -293,26 +297,30 @@ pub async fn check_if_paid(token: &Token, client: &reqwest::Client) -> bool {
     let result = try_check_if_paid(token, client).await;
     match result {
         Ok(paid) => paid,
-        Err(DexscreenError::TooManyRequests) => {
-            let Ok(res) = client
-                .get("http://httpbin.org/ip")
-                .header(header::USER_AGENT, "")
-                .send()
-                .await
-            else {
-                return false;
-            };
-            let Ok(ip_body) = res.text().await else {
-                println!("Failed to fetch IP");
-                return false;
-            };
-            println!("Ip check: {}", ip_body);
-            println!("Too many requests, sleeping for 5 seconds");
-            tokio::time::sleep(Duration::from_secs(5)).await;
-            return false;
-        }
         Err(e) => {
-            println!("Error: {}", e);
+            #[cfg(debug_assertions)]
+            {
+                let Ok(res) = client
+                    .get("http://httpbin.org/ip")
+                    .header(header::USER_AGENT, "")
+                    .send()
+                    .await
+                else {
+                    return false;
+                };
+                let Ok(ip_body) = res.text().await else {
+                    debug_println!("Failed to fetch IP");
+                    return false;
+                };
+                debug_println!("Ip check: {}", ip_body);
+            }
+            if matches!(e, DexscreenError::TooManyRequests) {
+                debug_println!("Too many requests, sleeping for 5 seconds");
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            } else {
+                debug_println!("Error: {}", e);
+            }
+
             return false;
         }
     }
