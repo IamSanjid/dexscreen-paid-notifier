@@ -3,14 +3,14 @@ use std::{
     time::Duration,
 };
 
-#[cfg(feature = "notify")]
-use actually_beep::beep_with_hz_and_millis;
 use chrono::{DateTime, Local};
 use fast_websocket_client::{OpCode, WebSocketClientError, base_client};
 use http::{HeaderMap, HeaderValue, header};
 #[cfg(feature = "notify")]
 use notify_rust::Notification;
 use reqwest;
+#[cfg(feature = "notify")]
+use rodio::{Decoder, OutputStream, source::Source};
 use tokio::{self, sync::broadcast, task::JoinHandle};
 
 use dexscreen_paid_notifier::common::Token;
@@ -62,6 +62,19 @@ fn create_client(
 
 type PaidNotification = (DateTime<Local>, Token);
 async fn paid_notifications(mut rx: broadcast::Receiver<PaidNotification>) {
+    #[cfg(feature = "notify")]
+    let (stream_handle, source) = {
+        let file =
+            std::io::BufReader::new(std::fs::File::open("beep.wav").expect("beep.wav not found"));
+        let source = Decoder::new(file).unwrap().buffered();
+        let (_stream, stream_handle) =
+            OutputStream::try_default().expect("Failed to open audio stream");
+
+        (stream_handle, source)
+    };
+    #[cfg(feature = "notify")]
+    let source = &source;
+
     while let Ok((now, token)) = rx.recv().await {
         let now = now.format("%H:%M:%S");
         let pumpfun_url = format!(
@@ -75,7 +88,6 @@ async fn paid_notifications(mut rx: broadcast::Receiver<PaidNotification>) {
 
         #[cfg(feature = "notify")]
         {
-            _ = beep_with_hz_and_millis(329, 1600);
             _ = Notification::new()
                 .summary("Token is paid!")
                 .body(
@@ -88,6 +100,14 @@ async fn paid_notifications(mut rx: broadcast::Receiver<PaidNotification>) {
                 .appname("Dexscreen Paid Notifier")
                 .timeout(5000)
                 .show();
+
+            let cloned_source = source.clone();
+            if stream_handle
+                .play_raw(cloned_source.convert_samples())
+                .is_ok()
+            {
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
         }
     }
 }
